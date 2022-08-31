@@ -1,0 +1,435 @@
+library(iNEXT)
+install.packages("ggplot2")
+library(ggplot2)
+install.packages("mobsim")
+library(mobsim)
+
+
+
+### coverage estimation
+e1G0=function(x){
+  t=ncol(x)
+  a=rowSums(x);
+  X=as.matrix(x); 
+  I=which(x>0);
+  X[I]=rep(1,length(I));
+  Y=rowSums(X); 
+  G1=sum(a[Y==1]);Q1=max(1,sum(Y==1)); 
+  G2=sum(a[Y==2]);Q2=max(1,sum(Y==2));
+  G3=sum(a[Y==3]);Q3=max(1,sum(Y==3));
+  G0=(t-1)/t*G1^2/(2*G2)+G1*max(Q1/(2*Q2)-Q2/(3*Q3),0)
+  return(c(G0))
+} ###estimator of a0
+newS=function(x) {
+  t=ncol(x);X=as.matrix(x); 
+  I=which(x>0);X[I]=rep(1,length(I));
+  Y=rowSums(X);
+  f1=max(1,sum(Y==1));f2=max(1,sum(Y==2));f3=max(1,sum(Y==3));
+  f0=(t-1)/t*f1^2/(2*f2)*(2-min(1,2*f2^2/(3*f1*f3)))
+  return(f0)
+} ###Chiu 2022
+Chao1=function(x) {
+  t=ncol(x);X=as.matrix(x); 
+  I=which(x>0);X[I]=rep(1,length(I));
+  Y=rowSums(X);
+  f1=max(1,sum(Y==1));f2=max(1,sum(Y==2));
+  f0=(t-1)/t*ifelse(f2==0, f1*(f1-1)/2,f1^2/(2*f2))
+  return(f0)
+} ##Chao1 1987
+var.newC1=function(x){
+  t=ncol(x);
+  a=rowSums(x);
+  X=as.matrix(x); I=which(x>0);X[I]=rep(1,length(I));
+  g0=e1G0(x);
+  G=sum(a)+g0;
+  
+  Y=rowSums(X); M=max(Y)
+  Gi=sapply(1:M,function(k) sum(a[Y==k]));
+  Qi=sapply(1:M,function(k) max(1,sum(Y==k)));
+  mG=sapply(1:M,function(k) ifelse(Qi[k]==0,0,Gi[k]/Qi[k]))
+  g1=mG[1];g2=mG[2];Q1=Qi[1];Q2=Qi[2];Q3=Qi[3];
+  c1=(t-1)/t*g1^2/g2*Q1/Q2+g1*(Q1/Q2-Q2/(3*Q3))
+  c2=-(t-1)/t*g1^2/g2*Q1^2/(2*Q2^2)+g1*(-Q1^2/(2*Q2^2)-Q1/(3*Q3))
+  c3=-g1*Q1*Q2/(3*Q3^2);
+  c4=mG[-(1:3)];
+  
+  Ai=c(c(c1,c2,c3)*(-1/G+g0/G^2),c4*g0/G^2);
+  S=sum(Y>0)+(t-1)/t*ifelse(Q2==0,Q1*(Q1-1)/2,Q1^2/(2*Q2));
+  Cov= -Qi%*%t(Qi)/S+diag(Qi);
+  Var=2*t(Ai)%*%Cov%*%Ai;
+  return(Var^(1/2))
+}
+var.gtC=function(x){
+  t=ncol(x);
+  a=rowSums(x);n=sum(a)
+  X=as.matrix(x); I=which(x>0);X[I]=rep(1,length(I));
+  Y=rowSums(X); Q1=sum(Y==1);Q2=sum(Y==2)
+  S=sum(Y>0)+(t-1)/t*ifelse(Q2==0,Q1*(Q1-1)/2,Q1^2/(2*Q2));
+  Var=Q1*(1-Q1/S)/n^2
+  return(Var^(1/2))
+}
+
+###### construct Tables 1-3 and Plot Figure1
+
+DATA=read.table("bciabun1010.txt")
+DATA=read.table("bciabun2020.txt")
+
+DATA=read.table("fus10.txt",header=T)
+DATA=read.table("fus20.txt",header=T)
+
+DATA=read.table("lhc10.txt",header=T)
+DATA=read.table("lhc20.txt",header=T)
+
+N=ncol(DATA)
+Di=rowSums(DATA)/N
+Pi=Di/sum(Di);
+
+t=c(10,20,30) #for Tables 1~3
+#t=seq(10,40,by=5); #for Figure1
+L=length(t);
+times=200;#data=matrix(0,ncol=times,nrow=S) #
+tC=c();gtC=c();e0C=c();newC=c();
+rmse.gtC=c();rmse.newC=c();sd.gtC=c();sd.newC=c();
+est.sd.gtC=c();est.sd.newC=c();
+cover.gtC=c();cover.newC=c()
+for(i in 1:L){
+  tc=c();gtc=c();newc=c();
+  est.sd.gtc=c(0);est.sd.newc=c(0);cover.gt=c(0);cover.new=c(0)
+  for(j in 1:times){
+    x=DATA[,sample(1:N,t[i],replace = T)];
+    X=rowSums(x);
+    gtc[j]=1-sum(X==1)/sum(X);
+    tc[j]=sum(Pi[X>0]);
+    newc[j]=sum(X)/(sum(X)+e1G0(x));
+    
+    est.sd.gtc[j]=var.gtC(x);
+    est.sd.newc[j]=var.newC1(x);
+    
+    L=newc[j]-1.95*est.sd.newc[j];U=newc[j]+1.95*est.sd.newc[j]
+    cover.new[j]=ifelse(U>tc[j] & L<tc[j],1,0)
+    L=gtc[j]-1.95*est.sd.gtc[j];U=gtc[j]+1.95*est.sd.gtc[j]
+    cover.gt[j]=ifelse(U>tc[j] & L<tc[j],1,0)
+  }
+  tC[i]=mean(tc);gtC[i]=mean(gtc);
+  newC[i]=mean(newc);
+  rmse.gtC[i]=mean((gtc-tc)^2)^(1/2);rmse.newC[i]=mean((newc-tc)^2)^(1/2);
+  sd.gtC[i]=sd(gtc);sd.newC[i]=sd(newc);
+  est.sd.gtC[i]=mean(est.sd.gtc);est.sd.newC[i]=mean(est.sd.newc);
+  cover.gtC[i]=mean(cover.gt);cover.newC[i]=mean(cover.new)
+}
+size=rep(t,each=2);
+true=rep(tC,each=2);
+I1=c(1,3,5);I2=c(2,4,6)
+est=c();est[I1]=gtC;est[I2]=newC
+bias=c();bias[I1]=gtC-tC;bias[I2]=newC-tC;
+sd=c();sd[I1]=sd.gtC;sd[I2]=sd.newC;
+est.sd=c();est.sd[I1]=est.sd.gtC;est.sd[I2]=est.sd.newC;
+rmse=c();rmse[I1]=rmse.gtC;rmse[I2]=rmse.newC;
+cover=c();cover[I1]=cover.gtC;cover[I2]=cover.newC;
+
+data=cbind(size,round(true,4),round(est,4),round(bias,4),round(sd,4),round(est.sd,4),round(rmse,3),cover)
+colnames(data)=c("size","true","Est","Bias","SD","est.SD","RMSE","Cover")
+data
+
+##R code for plot Figure1
+plot(t,gtC,type="l",lwd=4,col=2,ylim=c(0.7,1),ylab="Sample coverage",xlab="number of sample unit",cex.lab=1.5)
+lines(t,e0C,lwd=4,col=3)
+lines(t,newC,lwd=4,col=4)
+lines(t,tC,lwd=2,col=1,lty=2)
+legend("bottomright",c("true","Good-Turing","New proposed"),col=c(1,2,4),lwd=c(3,3,3),
+       cex=c(1.5,1.5,1.5),lty=c(2,1,1),bty="n")
+
+
+####Plot figure 2
+###iNEXT of sample coverage
+iNEXT.C=function(x,m){
+  t=ncol(x);g0=e1G0(x)
+  X=rowSums(x);X=X[X>0];G=sum(X)+g0;
+  XX=as.matrix(x);I=which(XX>0);
+  XX[I]=rep(1,length(I));
+  Y=rowSums(XX);Y=Y[Y>0];
+  if(m<=t){C=sum(X/G*(1-exp(lchoose(t-Y,m)-lchoose(t,m))))
+  }else{ Q1=max(1,sum(Y==1));Q2=sum(Y==2);Chao=ifelse(Q2==0,Q1*(Q1-1)/2,Q1^2/(2*Q2));
+  C=sum(X)/G+g0/G*(1-(1-2*Q2/((t-1)*Q1))^(m-t))   
+  }
+  return(C)
+} 
+
+DATA=read.table("bciabun1010.txt")
+#DATA=read.table("fus10.txt",header=T)
+#DATA=read.table("lhc10.txt",header=T)
+
+N=ncol(DATA)
+Di=rowSums(DATA)/N
+Pi=Di/sum(Di);
+tP=sapply(1:nrow(DATA),function(k) sum(DATA[k,]>0)/N)
+
+t=30;
+m=seq(1,2*t);L=length(m);
+times=50
+temp=matrix(0,ncol=L,nrow=times)
+for(i in 1:times){
+  x=DATA[,sample(1:N,t,replace = T)];
+  temp[i,]=sapply(1:L,function(k) iNEXT.C(x,m[k]))
+}
+
+###plot Figure2
+C=apply(temp,2,mean)
+I=which(m<t);
+plot(m[I],C[I],xlim=c(0,2*t),ylim=c(0.45,1.05),type="l",lwd=4,col=2,
+     ylab="Sample coverage",xlab="Number of plot",cex.lab=1.5)
+lines(m[-I],C[-I],lty=2,lwd=4,col=2)
+points(t,C[t],col=4,lwd=5)
+TC=sapply(1:L,function(k) 1-sum(Pi*(1-tP)^m[k]))
+lines(m,TC,col=1,lwd=2.5,lty=3)
+legend("bottomright",c("true","rarefaction","extrapolation"),col=c(1,2,2),lwd=c(4,4,4),
+       cex=c(1.5,1.5,1.5),lty=c(3,1,2),bty="n")
+
+
+#### plot figures 3-4 and construct Table4 and Table5
+
+##### richness comparison
+iNEXT.S=function(x,m){
+  X=as.matrix(x);I=which(x>0);
+  X[I]=rep(1,length(I));
+  out=iNEXT(X,q=0,datatype="incidence_raw")
+  
+}
+iNEXT.C=function(x,m){
+  t=ncol(x);g0=e1G0(x)
+  X=rowSums(x);X=X[X>0];G=sum(X)+g0;
+  XX=as.matrix(x);I=which(XX>0);
+  XX[I]=rep(1,length(I));
+  Y=rowSums(XX);Y=Y[Y>0];
+  if(m<=t){C=sum(X/G*(1-exp(lchoose(t-Y,m)-lchoose(t,m))))
+  }else{ Q1=max(1,sum(Y==1));Q2=sum(Y==2);Chao=ifelse(Q2==0,Q1*(Q1-1)/2,Q1^2/(2*Q2));
+  C=sum(X)/G+g0/G*(1-(1-2*Q2/((t-1)*Q1))^(m-t))   
+  }
+  return(C)
+} 
+
+###iNEXT of richness
+conf.reg=function(x_axis,LCL,UCL,...) {
+  x.sort <- order(x_axis)
+  x <- x_axis[x.sort]
+  LCL <- LCL[x.sort]
+  UCL <- UCL[x.sort]
+  polygon(c(x,rev(x)),c(LCL,rev(UCL)), ...)
+}
+
+##Case1
+DATA=read.table("bciabun1010.txt")
+BCI.DATA=DATA
+DATA=read.table("fus10.txt",header=T)
+FS.DATA=DATA
+DATA=read.table("lhc10.txt",header=T)
+LHC.DATA=DATA
+
+t=20;m=seq(1,2*t);L=length(m);
+#Case2
+DATA=read.table("bciabun1010.txt",header = T)
+BCI.DATA=DATA
+DATA=read.table("fus50.txt",header=T)
+FS.DATA=DATA
+DATA=read.table("lhc20.txt",header=T)
+LHC.DATA=DATA
+t=25;m=seq(1,2*t);L=length(m);
+
+###
+N=ncol(FS.DATA)
+Di=rowSums(FS.DATA)/N
+Pi=Di/sum(Di);
+times=50;
+fsS=rep(0,L);fsC=rep(0,L);fsSU=rep(0,L);fsSL=rep(0,L);fsOC=rep(0,L)
+for(i in 1:times){
+x=FS.DATA[,sample(1:N,t,replace = T)];
+X=as.matrix(x);I=which(x>0);
+X[I]=rep(1,length(I));II=which(rowSums(X)>0)
+XX=rowSums(X[II,]);
+o=iNEXT(c(t,XX),q=0,datatype = "incidence_freq",knots = 2*t)
+newC=sapply(1:L,function(k) iNEXT.C(x,m[k]))
+o$iNextEst$newC=newC
+oFS=o$iNextEst
+fsS=fsS+oFS$qD;
+fsC=fsC+oFS$newC;
+fsOC=fsOC+oFS$SC;
+fsSU=fsSU+oFS$qD.UCL;
+fsSL=fsSL+oFS$qD.LCL;
+}
+fsS=fsS/times;fsC=fsC/times;fsSU=fsSU/times;fsSL=fsSL/times;
+fsOC=fsOC/times
+fs=data.frame(cbind(t=m,S=fsS,C=fsC,OC=fsOC,SU95=fsSU,SL95=fsSL));
+
+
+###
+N=ncol(BCI.DATA)
+Di=rowSums(BCI.DATA)/N
+Pi=Di/sum(Di);
+times=50;
+bciS=rep(0,L);bciC=rep(0,L);bciOC=rep(0,L);bciSU=rep(0,L);bciSL=rep(0,L);
+for(i in 1:times){
+x=BCI.DATA[,sample(1:N,t,replace = T)];
+X=as.matrix(x);I=which(x>0);
+X[I]=rep(1,length(I));II=which(rowSums(X)>0)
+XX=rowSums(X[II,]);
+o=iNEXT(c(t,XX),q=0,datatype = "incidence_freq",knots = 2*t)
+newC=sapply(1:L,function(k) iNEXT.C(x,m[k]))
+o$iNextEst$newC=newC
+oBCI=o$iNextEst
+bciS=bciS+oBCI$qD;
+bciC=bciC+oBCI$newC;
+bciOC=bciOC+oBCI$SC;
+bciSU=bciSU+oBCI$qD.UCL;
+bciSL=bciSL+oBCI$qD.LCL;
+}
+bciS=bciS/times;bciC=bciC/times;bciOC=bciOC/times;bciSU=bciSU/times;bciSL=bciSL/times;
+bci=data.frame(cbind(t=m,S=bciS,C=bciC,OC=bciOC,SU95=bciSU,SL95=bciSL));
+
+###
+N=ncol(LHC.DATA)
+Di=rowSums(LHC.DATA)/N
+Pi=Di/sum(Di);
+times=50;
+lhcS=rep(0,L);lhcC=rep(0,L);lhcOC=rep(0,L);lhcSU=rep(0,L);lhcSL=rep(0,L);
+for(i in 1:times){
+x=LHC.DATA[,sample(1:N,t,replace = T)];
+X=as.matrix(x);I=which(x>0);
+X[I]=rep(1,length(I));II=which(rowSums(X)>0)
+XX=rowSums(X[II,]);
+o=iNEXT(c(t,XX),q=0,datatype = "incidence_freq",knots = 2*t)
+newC=sapply(1:L,function(k) iNEXT.C(x,m[k]))
+o$iNextEst$newC=newC
+oLHC=o$iNextEst
+lhcS=lhcS+oLHC$qD;
+lhcC=lhcC+oLHC$newC;
+lhcOC=lhcOC+oLHC$SC;
+lhcSU=lhcSU+oLHC$qD.UCL;
+lhcSL=lhcSL+oLHC$qD.LCL;
+}
+lhcS=lhcS/times;lhcC=lhcC/times;lhcOC=lhcOC/times;lhcSU=lhcSU/times;lhcSL=lhcSL/times;
+lhc=data.frame(cbind(t=m,S=lhcS,C=lhcC,OC=lhcOC,SU95=lhcSU,SL95=lhcSL));
+
+
+#### 
+I=which(bci$t<t)
+###iNEXT by sample size ###plot figure3(4) left panel
+plot(bci$t[I[-c(1)]],bci$S[I[-c(1)]],type="l",xlab="Sample size (number of plots)",ylab ="Species richness",
+     col=4,lwd=3,ylim=c(1,200),xlim=c(1,40),cex.lab=1.5)
+points(bci$t[t],bci$S[t],col=4,lwd=5)
+lines(bci$t[-I],bci$S[-I],col=4,lwd=3,lty=2)
+conf.reg(bci$t,bci$SL95,bci$SU95,border=NA,col=adjustcolor(4,0.2))
+
+lines(fs$t[I[-c(1)]],fs$S[I[-c(1)]],type="l",col=2,lwd=3)
+points(fs$t[t],fs$S[t],col=2,lwd=5)
+lines(fs$t[-I],fs$S[-I],col=2,lwd=3,lty=2)
+conf.reg(fs$t,fs$SL95,fs$SU95,border=NA,col=adjustcolor(2,0.2))
+
+lines(lhc$t[I[-c(1)]],lhc$S[I[-c(1)]],type="l",col=3,lwd=3)
+points(lhc$t[t],lhc$S[t],col=3,lwd=5)
+lines(lhc$t[-I],lhc$S[-I],col=3,lwd=3,lty=2)
+conf.reg(lhc$t,lhc$SL95,lhc$SU95,border=NA,col=adjustcolor(3,0.2))
+
+legend("topleft",c("BCI","FS","LHC"),col=c(4,2,3),lwd=c(4,4,4),
+       cex=c(1.4,1.4,1.4),lty=c(1,1,1),bty="n")
+
+###incidence-based sample coverage. ##plot figure3(4) middle panel
+plot(bci$OC[I],bci$S[I],type="l",xlab="Incidence-based sample coverage",ylab ="Species richness",
+     col=4,lwd=3,ylim=c(1,200),xlim=c(0.8,1),cex.lab=1.5)
+points(bci$OC[t],bci$S[t],col=4,lwd=5)
+lines(bci$OC[-I],bci$S[-I],col=4,lwd=3,lty=2)
+conf.reg(bci$OC,bci$SL95,bci$SU95,border=NA,col=adjustcolor(4,0.2))
+
+lines(fs$OC[I],fs$S[I],type="l",col=2,lwd=3)
+points(fs$OC[t],fs$S[t],col=2,lwd=5)
+lines(fs$OC[-I],fs$S[-I],col=2,lwd=3,lty=2)
+conf.reg(fs$OC,fs$SL,fs$SU,border=NA,col=adjustcolor(2,0.2))
+
+lines(lhc$OC[I],lhc$S[I],type="l",col=3,lwd=3)
+points(lhc$OC[t],lhc$S[t],col=3,lwd=5)
+lines(lhc$OC[-I],lhc$S[-I],col=3,lwd=3,lty=2)
+conf.reg(lhc$OC,lhc$SL,lhc$SU,border=NA,col=adjustcolor(3,0.2))
+
+legend("topleft",c("BCI","FS","LHC"),col=c(4,2,3),lwd=c(4,4,4),
+       cex=c(1.4,1.4,1.4),lty=c(1,1,1),bty="n")
+
+###iNEXT by abundance-coverage.  ##plot figure3(4) right panel
+plot(bci$C[I],bci$S[I],type="l",xlab="Abundance-based sample coverage",ylab ="Species richness",
+     col=4,lwd=3,ylim=c(1,200),xlim=c(0.9,1),cex.lab=1.5)
+points(bci$C[t],bci$S[t],col=4,lwd=5)
+lines(bci$C[-I],bci$S[-I],col=4,lwd=3,lty=2)
+conf.reg(bci$C,bci$SL95,bci$SU95,border=NA,col=adjustcolor(4,0.2))
+
+lines(fs$C[I],fs$S[I],type="l",col=2,lwd=3)
+points(fs$C[t],fs$S[t],col=2,lwd=5)
+lines(fs$C[-I],fs$S[-I],col=2,lwd=3,lty=2)
+conf.reg(fs$C,fs$SL,fs$SU,border=NA,col=adjustcolor(2,0.2))
+
+lines(lhc$C[I],lhc$S[I],type="l",col=3,lwd=3)
+points(lhc$C[t],lhc$S[t],col=3,lwd=5)
+lines(lhc$C[-I],lhc$S[-I],col=3,lwd=3,lty=2)
+conf.reg(lhc$C,lhc$SL,lhc$SU,border=NA,col=adjustcolor(3,0.2))
+
+legend("topleft",c("BCI","FS","LHC"),col=c(4,2,3),lwd=c(4,4,4),
+       cex=c(1.4,1.4,1.4),lty=c(1,1,1),bty="n")
+
+
+#####.  construct Tables 4 and 5
+###number of plots. 
+k=c(10,20,30)
+
+data=matrix(0,ncol=5,nrow=9);
+for(i in 1:length(k)){
+  temp=as.matrix(rbind(bci[k[i],c(1:4)],lhc[k[i],c(1:4)],fs[k[i],c(1:4)]));
+  ratio=temp[1:3,2]/temp[3,2];
+  data[(1+(i-1)*3):(3+(i-1)*3),]=cbind(temp,ratio)
+}
+dataSize=data.frame(data)
+colnames(dataSize)=c("size m","S(m)","C_abun(m)","C_inci(m)","ratio")
+dataSize
+
+###abundance-based sample coverage
+c(range(bci[,3]),range(lhc[,3]),range(fs[,3]))
+k=c(0.965,0.97,0.975)
+data=matrix(0,ncol=5,nrow=9);
+for(i in 1:length(k)){
+  I1=sum(bci$C<k[i]);w1=(k[i]-bci$C[I1])/(bci$C[I1+1]-bci$C[I1])
+  I2=sum(lhc$C<k[i]);w2=(k[i]-lhc$C[I2])/(lhc$C[I2+1]-lhc$C[I2])
+  I3=sum(fs$C<k[i]);w3=(k[i]-fs$C[I3])/(fs$C[I3+1]-fs$C[I3]);
+  temp=as.matrix(rbind(bci[I1,c(1:4)]*(1-w1)+bci[I1+1,c(1:4)]*(w1),
+                       lhc[I2,c(1:4)]*(1-w2)+lhc[I2+1,c(1:4)]*(w2),
+                       fs[I3,c(1:4)]*(1-w3)+fs[I3+1,c(1:4)]*(w3)))
+ # temp=as.matrix(rbind(bci[sum(bci$C<k[i]),c(1:4)],
+ #        lhc[sum(lhc$C<k[i]),c(1:4)],fs[sum(fs$C<k[i]),c(1:4)]));
+  ratio=temp[1:3,2]/temp[3,2];
+  data[(1+(i-1)*3):(3+(i-1)*3),]=cbind(temp,ratio)
+}
+dataCover=data.frame(data)
+colnames(dataCover)=c("size m","S(m)","C_abun(m)","C_inci(m)","ratio")
+dataCover
+
+#####incidenc-based sample coverage
+c(range(bci[,4]),range(lhc[,4]),range(fs[,4]))
+k=c(0.94,0.95,0.96)
+data=matrix(0,ncol=5,nrow=9);
+for(i in 1:length(k)){
+  I1=sum(bci$OC<k[i]);w1=(k[i]-bci$OC[I1])/(bci$OC[I1+1]-bci$OC[I1])
+  I2=sum(lhc$OC<k[i]);w2=(k[i]-lhc$OC[I2])/(lhc$OC[I2+1]-lhc$OC[I2])
+  I3=sum(fs$OC<k[i]);w3=(k[i]-fs$OC[I3])/(fs$OC[I3+1]-fs$OC[I3]);
+  temp=as.matrix(rbind(bci[I1,c(1:4)]*(1-w1)+bci[I1+1,c(1:4)]*(w1),
+                       lhc[I2,c(1:4)]*(1-w2)+lhc[I2+1,c(1:4)]*(w2),
+                       fs[I3,c(1:4)]*(1-w3)+fs[I3+1,c(1:4)]*(w3)))
+  
+ # temp=as.matrix(rbind(bci[sum(bci$OC<k[i]),c(1:4)],
+ #                     lhc[sum(lhc$OC<k[i]),c(1:4)],fs[sum(fs$OC<k[i]),c(1:4)]));
+  ratio=temp[1:3,2]/temp[3,2];
+  data[(1+(i-1)*3):(3+(i-1)*3),]=cbind(temp,ratio)
+}
+dataOCover=data.frame(data)
+colnames(dataOCover)=c("size m","S(m)","C_abun(m)","C_inci(m)","ratio")
+dataOCover
+
+
+da=rbind(dataSize,dataOCover,dataCover)
+da
+
+c(298,145,110)/110  ##true richness ratio
